@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"reflect"
 )
 
 func readMail(msg *imap.Message) string {
@@ -40,18 +39,6 @@ func readMail(msg *imap.Message) string {
 	}
 
 	return "Did not work"
-}
-
-func ChanToSlice(ch interface{}) interface{} {
-	chv := reflect.ValueOf(ch)
-	slv := reflect.MakeSlice(reflect.SliceOf(reflect.TypeOf(ch).Elem()), 0, 0)
-	for {
-		v, ok := chv.Recv()
-		if !ok {
-			return slv.Interface()
-		}
-		slv = reflect.Append(slv, v)
-	}
 }
 
 func main() {
@@ -87,19 +74,6 @@ func main() {
 		}
 	}()
 
-	//messageList := make([]map[string]string, mbox.Messages)
-	//
-	//idx := 0
-	//for msg := range messages {
-	//	msgMap := make(map[string]string)
-	//	msgMap['.Name'] =  msg.Envelope.Subject
-	//	msgMap
-	//	messageList[idx] = msg.Envelope.Subject
-	//	idx++
-	//}
-
-	//println(messageList)
-
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}?",
 		Active:   "> {{ .Envelope.Subject | cyan }}",
@@ -107,21 +81,27 @@ func main() {
 		Selected: "* {{ .Envelope.Subject | red | cyan }}",
 	}
 
+	messageSlice := make([]*imap.Message, mbox.Messages)
+
+	idx := 0
+	for msg := range messages {
+		messageSlice[idx] = msg
+		idx++
+	}
+
 	prompt := promptui.Select{
 		Label: "Select email",
-		Items: ChanToSlice(messages),
+		Items: messageSlice,
 		Templates: templates,
 	}
 
-	_, result, err := prompt.Run()
+	i, _, err := prompt.Run()
 
 	if err != nil {
 		fmt.Printf("Prompt failed %v\n", err)
 		return
 	}
 
-	fmt.Printf("You choose %q\n", result)
-
-	//var contents = readMail(msg)
-
+	var contents = readMail(messageSlice[i])
+	println(contents)
 }
