@@ -1,35 +1,25 @@
 package main
 
 import (
-	ui "github.com/VladimirMarkelov/clui"
+	"fmt"
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/mail"
+	"github.com/manifoldco/promptui"
 	"io"
 	"io/ioutil"
 	"log"
+	"reflect"
 )
 
-func readMail(r imap.Literal) string {
+func readMail(msg *imap.Message) string {
+	var section imap.BodySectionName
+	r := msg.GetBody(&section)
+
 	// Create a new mail reader
 	mr, err := mail.CreateReader(r)
 	if err != nil {
 		log.Fatal(err)
-	}
-
-	// Print some info about the message
-	header := mr.Header
-	if date, err := header.Date(); err == nil {
-		log.Println("Date:", date)
-	}
-	if from, err := header.AddressList("From"); err == nil {
-		log.Println("From:", from)
-	}
-	if to, err := header.AddressList("To"); err == nil {
-		log.Println("To:", to)
-	}
-	if subject, err := header.Subject(); err == nil {
-		log.Println("Subject:", subject)
 	}
 
 	// Process each message's part
@@ -46,11 +36,22 @@ func readMail(r imap.Literal) string {
 			// This is the message's text (can be plain-text or HTML)
 			b, _ := ioutil.ReadAll(p.Body)
 			return string(b)
-			log.Println("Got text: %v", string(b))
 		}
 	}
 
-	return ""
+	return "Did not work"
+}
+
+func ChanToSlice(ch interface{}) interface{} {
+	chv := reflect.ValueOf(ch)
+	slv := reflect.MakeSlice(reflect.SliceOf(reflect.TypeOf(ch).Elem()), 0, 0)
+	for {
+		v, ok := chv.Recv()
+		if !ok {
+			return slv.Interface()
+		}
+		slv = reflect.Append(slv, v)
+	}
 }
 
 func main() {
@@ -65,8 +66,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	done := make(chan error, 1)
-
 	mbox, err := c.Select("INBOX", false)
 	if err != nil {
 		log.Fatal(err)
@@ -74,48 +73,55 @@ func main() {
 
 	from := uint32(1)
 	to := mbox.Messages
-	seqset := new(imap.SeqSet)
-	seqset.AddRange(from, to)
+	seqSet := new(imap.SeqSet)
+	seqSet.AddRange(from, to)
 
-	messages := make(chan *imap.Message, 10)
-	done = make(chan error, 1)
+	// Get the whole message body
+	var section imap.BodySectionName
+	items := []imap.FetchItem{section.FetchItem(), imap.FetchEnvelope}
+
+	messages := make(chan *imap.Message, mbox.Messages)
 	go func() {
-		done <- c.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope}, messages)
+		if err := c.Fetch(seqSet, items, messages); err != nil {
+			log.Fatal(err)
+		}
 	}()
 
-	if err := <-done; err != nil {
-		log.Fatal(err)
+	//messageList := make([]map[string]string, mbox.Messages)
+	//
+	//idx := 0
+	//for msg := range messages {
+	//	msgMap := make(map[string]string)
+	//	msgMap['.Name'] =  msg.Envelope.Subject
+	//	msgMap
+	//	messageList[idx] = msg.Envelope.Subject
+	//	idx++
+	//}
+
+	//println(messageList)
+
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}?",
+		Active:   "> {{ .Envelope.Subject | cyan }}",
+		Inactive: "  {{ .Envelope.Subject | cyan }}",
+		Selected: "* {{ .Envelope.Subject | red | cyan }}",
 	}
 
-	ui.InitLibrary()
-	defer ui.DeinitLibrary()
-
-	wnd := ui.AddWindow(0, 0, 60, ui.AutoSize, "Emails in inbox")
-	wnd.SetSizable(false)
-
-	drawEmailContents := func(val string) {
-		textView := ui.CreateTextView(wnd, 50, 12, 1)
-		textView.AddText([]string{val})
+	prompt := promptui.Select{
+		Label: "Select email",
+		Items: ChanToSlice(messages),
+		Templates: templates,
 	}
 
-	drawEmailList := func() {
-		frm := ui.CreateFrame(wnd, 50, 12, ui.BorderNone, ui.Fixed)
-		frm.SetPack(ui.Vertical)
-		frm.SetScrollable(true)
+	_, result, err := prompt.Run()
 
-		for msg := range messages {
-			btn := ui.CreateButton(frm, 40, ui.AutoSize, msg.Envelope.Subject, 1)
-
-			btn.OnClick(func(ev ui.Event) {
-				var section imap.BodySectionName
-				r := msg.GetBody(&section)
-				var contents = readMail(r)
-				drawEmailContents(contents)
-			})
-		}
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
 	}
 
-	drawEmailList()
+	fmt.Printf("You choose %q\n", result)
 
-	ui.MainLoop()
+	//var contents = readMail(msg)
+
 }
